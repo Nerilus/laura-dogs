@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: 'Playfair Display', Georgia, serif;
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+
+  --color-terracotta-50: #fdf6f2;
+  --color-terracotta-100: #faebd7;
+  --color-terracotta-200: #f5d4c3;
+  --color-terracotta-300: #ebb59d;
+  --color-terracotta-400: #df8c6f;
+  --color-terracotta-500: #cb5d38;
+  --color-terracotta-600: #b84a27;
+  --color-terracotta-700: #993a20;
+  --color-terracotta-800: #7d321f;
+  --color-terracotta-900: #672d1e;
+
+  --color-cream-50: #fdfbf8;
+  --color-cream-100: #f8f4ec;
+  --color-cream-200: #f1ebdE;
+  --color-cream-300: #e5dcce;
+  --color-cream-400: #d0c2ae;
+
+  --color-warmwood-600: #6b4328;
+  --color-warmwood-700: #55341f;
+  --color-warmwood-800: #42281a;
+  --color-warmwood-900: #2c1810;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: #faf6f0;
+    color: #2c1810;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, .font-serif {
+    font-family: var(--font-serif);
+  }
+}
+
+/* Custom subtle animations */
+@keyframes floatSlow {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.animate-float-slow {
+  animation: floatSlow 6s ease-in-out infinite;
+}
+
+.animate-float-delayed {
+  animation: floatSlow 7s ease-in-out 2s infinite;
+}
+
+/* iOS Safe Area & Touch ergonomics */
+.safe-area-bottom {
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+}
+
+@supports (-webkit-touch-callout: none) {
+  /* iOS smooth scrolling and tap highlight normalization */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
