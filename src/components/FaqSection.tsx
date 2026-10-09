@@ -7,7 +7,7 @@ interface FaqItem {
   category: string;
 }
 
-export const FAQ_DATA: FaqItem[] = [
+const FAQ_DATA: FaqItem[] = [
   {
     category: "Déroulement",
     question: "Quelle est la durée moyenne d'une séance de toilettage ?",

@@ -1,0 +1,149 @@
+name: CI/CD Pipeline - Déploiement Production VPS
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ============================================================================
+  # 1. Vérification de la qualité du code (Linting & TypeScript Build)
+  # ============================================================================
+  check:
+    name: Lint & Build Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      - name: Configurer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Exécuter le linter (oxlint)
+        run: npm run lint
+
+      - name: Vérifier la compilation Vite (Typecheck & Build)
+        run: npm run build
+
+  # ============================================================================
+  # 2. Construction et publication de l'image Docker sur GitHub Packages (GHCR)
+  # ============================================================================
+  build-and-push:
+    name: Build & Push Docker Image
+    needs: check
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      - name: Configurer Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Connexion au registre GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Déterminer les tags et labels Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      - name: Compiler et publier l'image Docker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ============================================================================
+  # 3. Déploiement automatique sur le VPS via SSH & Docker Compose
+  # ============================================================================
+  deploy:
+    name: Deploy to VPS
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code source pour docker-compose
+        uses: actions/checkout@v4
+
+      - name: Préparer le dossier d'hébergement sur le VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            DEPLOY_DIR="${{ secrets.VPS_DEPLOY_PATH || '/opt/lauradogs' }}"
+            mkdir -p "$DEPLOY_DIR"
+
+      - name: Synchroniser docker-compose.yml sur le VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: "docker-compose.yml"
+          target: "${{ secrets.VPS_DEPLOY_PATH || '/opt/lauradogs' }}"
+
+      - name: Déployer et redémarrer les conteneurs sur le VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            DEPLOY_DIR="${{ secrets.VPS_DEPLOY_PATH || '/opt/lauradogs' }}"
+            cd "$DEPLOY_DIR"
+
+            # Authentification éphémère auprès de GHCR pour télécharger l'image
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+            echo "🚀 Téléchargement de la nouvelle image Docker..."
+            docker compose pull
+
+            echo "🔄 Démarrage du conteneur en production..."
+            docker compose up -d --remove-orphans
+
+            echo "⏳ Attente de la validation du Healthcheck..."
+            sleep 5
+            docker compose ps
+
+            echo "🧹 Nettoyage des anciennes images Docker inutilisées..."
+            docker image prune -f
+
+            echo "✅ Déploiement Laura' Dogs terminé avec succès !"

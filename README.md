@@ -30,3 +30,7 @@ If you are developing a production application, we recommend enabling type-aware
 ```
 
 See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+
+## 🚀 Déploiement en Production
+
+Pour le guide complet de déploiement automatique sur VPS (Docker, GitHub Actions, Nginx Reverse Proxy), consultez [DEPLOY.md](DEPLOY.md).
