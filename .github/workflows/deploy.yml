@@ -15,7 +15,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: nerilus/laura-dogs
 
 jobs:
   # ============================================================================
@@ -51,8 +51,6 @@ jobs:
     needs: check
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
-    outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
     steps:
       - name: Récupérer le code source
         uses: actions/checkout@v4
@@ -98,52 +96,47 @@ jobs:
       - name: Récupérer le code source pour docker-compose
         uses: actions/checkout@v4
 
-      - name: Préparer le dossier d'hébergement sur le VPS
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT || 22 }}
-          script: |
-            DEPLOY_DIR="${{ secrets.VPS_DEPLOY_PATH || '/opt/lauradogs' }}"
-            mkdir -p "$DEPLOY_DIR"
+      - name: Déployer sur le VPS via SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USERNAME }}
+          VPS_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_PATH: ${{ secrets.VPS_DEPLOY_PATH }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+        run: |
+          if [ -z "$VPS_HOST" ] || [ -z "$VPS_USER" ] || [ -z "$VPS_KEY" ]; then
+            echo "❌ ERREUR : Les secrets GitHub VPS_HOST, VPS_USERNAME et/ou VPS_SSH_KEY ne sont pas configurés."
+            echo "Veuillez les ajouter dans Settings > Secrets and variables > Actions."
+            exit 1
+          fi
 
-      - name: Synchroniser docker-compose.yml sur le VPS
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT || 22 }}
-          source: "docker-compose.yml"
-          target: "${{ secrets.VPS_DEPLOY_PATH || '/opt/lauradogs' }}"
+          PORT="${VPS_PORT:-22}"
+          TARGET_DIR="${VPS_PATH:-/opt/lauradogs}"
 
-      - name: Déployer et redémarrer les conteneurs sur le VPS
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT || 22 }}
-          script: |
-            DEPLOY_DIR="${{ secrets.VPS_DEPLOY_PATH || '/opt/lauradogs' }}"
-            cd "$DEPLOY_DIR"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "$VPS_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
 
-            # Authentification éphémère auprès de GHCR pour télécharger l'image
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          SSH_CMD="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p $PORT $VPS_USER@$VPS_HOST"
+          SCP_CMD="scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P $PORT"
 
-            echo "🚀 Téléchargement de la nouvelle image Docker..."
+          echo "📁 Préparation du dossier $TARGET_DIR sur le VPS..."
+          $SSH_CMD "mkdir -p $TARGET_DIR"
+
+          echo "📄 Transfert de docker-compose.yml..."
+          $SCP_CMD docker-compose.yml "$VPS_USER@$VPS_HOST:$TARGET_DIR/docker-compose.yml"
+
+          echo "🚀 Mise à jour et redémarrage du conteneur sur le VPS..."
+          $SSH_CMD "
+            cd '$TARGET_DIR'
+            echo '$GH_TOKEN' | docker login ghcr.io -u '$GH_ACTOR' --password-stdin
             docker compose pull
-
-            echo "🔄 Démarrage du conteneur en production..."
             docker compose up -d --remove-orphans
-
-            echo "⏳ Attente de la validation du Healthcheck..."
-            sleep 5
-            docker compose ps
-
-            echo "🧹 Nettoyage des anciennes images Docker inutilisées..."
             docker image prune -f
+            docker compose ps
+          "
 
-            echo "✅ Déploiement Laura' Dogs terminé avec succès !"
+          echo "✅ Déploiement terminé avec succès !"
